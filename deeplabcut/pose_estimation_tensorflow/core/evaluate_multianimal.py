@@ -151,6 +151,7 @@ def evaluate_multianimal_full(
             "CollectedData_" + cfg["scorer"] + ".h5",
         )
     )
+    OrigData = Data
     conversioncode.guarantee_multiindex_rows(Data)
 
     # Get list of body parts to evaluate network for
@@ -165,6 +166,7 @@ def evaluate_multianimal_full(
     auxiliaryfunctions.attempttomakefolder(
         str(cfg["project_path"] + "/evaluation-results/")
     )
+    my_all_results = []
     for shuffle in Shuffles:
         for trainFraction in TrainingFractions:
             ##################################################
@@ -194,7 +196,9 @@ def evaluate_multianimal_full(
             )
 
             if test_only:
-                Data = Data.iloc[testIndices]
+                # print('only using first 10 idx')
+                # testIndices = testIndices[:10]
+                Data = OrigData.iloc[testIndices]
 
             try:
                 dlc_cfg = load_config(str(path_test_config))
@@ -261,6 +265,7 @@ def evaluate_multianimal_full(
                     )
 
                 final_result = []
+                my_test_results = []
                 ##################################################
                 # Compute predictions over images
                 ##################################################
@@ -321,10 +326,12 @@ def evaluate_multianimal_full(
                         dist = np.full((len(Data), len(all_bpts)), np.nan)
                         conf = np.full_like(dist, np.nan)
                         print("Network Evaluation underway...")
+                        print(Data)
                         for imageindex, imagename in tqdm(enumerate(Data.index)):
+                            print('start for loop', imageindex, imagename)
                             image_path = os.path.join(cfg["project_path"], *imagename)
                             frame = auxfun_videos.imread(image_path, mode="skimage")
-
+                            print('frame', frame)
                             GT = Data.iloc[imageindex]
                             if not GT.any():
                                 continue
@@ -332,10 +339,13 @@ def evaluate_multianimal_full(
                             # Pass the image and the keypoints through the resizer;
                             # this has no effect if no augmenters were added to it.
                             keypoints = [GT.to_numpy().reshape((-1, 2)).astype(float)]
+                            print('keypoints', keypoints)
                             frame_, keypoints = pipeline(
                                 images=[frame], keypoints=keypoints
                             )
                             frame = frame_[0]
+                            print('keypoints2', keypoints)
+                            print('frame2', keypoints)
                             GT[:] = keypoints[0].flatten()
 
                             df = GT.unstack("coords").reindex(joints, level="bodyparts")
@@ -497,189 +507,194 @@ def evaluate_multianimal_full(
                             np.round(error_test_cut, 2),
                         ]
                         final_result.append(results)
+                        my_test_results.append(error_test)
+                #
+                #         if show_errors:
+                #             string = (
+                #                 "Results for {} training iterations, training fraction of {}, and shuffle {}:\n"
+                #                 "Train error: {} pixels. Test error: {} pixels.\n"
+                #                 "With pcutoff of {}:\n"
+                #                 "Train error: {} pixels. Test error: {} pixels."
+                #             )
+                #             print(string.format(*results))
+                #
+                #             print("##########################################")
+                #             print(
+                #                 "Average Euclidean distance to GT per individual (in pixels; test-only)"
+                #             )
+                #             if test_only:
+                #                 print(
+                #                     error_masked
+                #                     .groupby("individuals", axis=1)
+                #                     .mean()
+                #                     .mean()
+                #                     .to_string()
+                #                 )
+                #             else:
+                #                 print(
+                #                     error_masked.iloc[testIndices]
+                #                     .groupby("individuals", axis=1)
+                #                     .mean()
+                #                     .mean()
+                #                     .to_string()
+                #                 )
+                #             print(
+                #                 "Average Euclidean distance to GT per bodypart (in pixels; test-only)"
+                #             )
+                #             if test_only:
+                #                 print(
+                #                     error_masked
+                #                     .groupby("bodyparts", axis=1)
+                #                     .mean()
+                #                     .mean()
+                #                     .to_string()
+                #                 )
+                #             else:
+                #                 print(
+                #                     error_masked.iloc[testIndices]
+                #                     .groupby("bodyparts", axis=1)
+                #                     .mean()
+                #                     .mean()
+                #                     .to_string()
+                #                 )
+                #
+                #         PredicteData["metadata"] = {
+                #             "nms radius": dlc_cfg["nmsradius"],
+                #             "minimal confidence": dlc_cfg["minconfidence"],
+                #             "sigma": dlc_cfg.get("sigma", 1),
+                #             "PAFgraph": dlc_cfg["partaffinityfield_graph"],
+                #             "PAFinds": np.arange(
+                #                 len(dlc_cfg["partaffinityfield_graph"])
+                #             ),
+                #             "all_joints": [
+                #                 [i] for i in range(len(dlc_cfg["all_joints"]))
+                #             ],
+                #             "all_joints_names": [
+                #                 dlc_cfg["all_joints_names"][i]
+                #                 for i in range(len(dlc_cfg["all_joints"]))
+                #             ],
+                #             "stride": dlc_cfg.get("stride", 8),
+                #         }
+                #         print(
+                #             "Done and results stored for snapshot: ",
+                #             Snapshots[snapindex],
+                #         )
+                #
+                #         dictionary = {
+                #             "Scorer": DLCscorer,
+                #             "DLC-model-config file": dlc_cfg,
+                #             "trainIndices": trainIndices,
+                #             "testIndices": testIndices,
+                #             "trainFraction": trainFraction,
+                #         }
+                #         metadata = {"data": dictionary}
+                #         _ = auxfun_multianimal.SaveFullMultiAnimalData(
+                #             PredicteData, metadata, resultsfilename
+                #         )
+                #
+                #         tf.compat.v1.reset_default_graph()
+                #
+                #     n_multibpts = len(cfg["multianimalbodyparts"])
+                #     if n_multibpts == 1:
+                #         continue
+                #
+                #     # Skip data-driven skeleton selection unless
+                #     # the model was trained on the full graph.
+                #     max_n_edges = n_multibpts * (n_multibpts - 1) // 2
+                #     n_edges = len(dlc_cfg["partaffinityfield_graph"])
+                #     if n_edges == max_n_edges:
+                #         print("Selecting best skeleton...")
+                #         n_graphs = 10
+                #         paf_inds = None
+                #     else:
+                #         n_graphs = 1
+                #         paf_inds = [list(range(n_edges))]
+                #     (
+                #         results,
+                #         paf_scores,
+                #         best_assemblies,
+                #     ) = crossvalutils.cross_validate_paf_graphs(
+                #         config,
+                #         str(path_test_config).replace("pose_", "inference_"),
+                #         data_path,
+                #         data_path.replace("_full.", "_meta."),
+                #         n_graphs=n_graphs,
+                #         paf_inds=paf_inds,
+                #         oks_sigma=dlc_cfg.get("oks_sigma", 0.1),
+                #         margin=dlc_cfg.get("bbox_margin", 0),
+                #         symmetric_kpts=dlc_cfg.get("symmetric_kpts"),
+                #     )
+                #     # if plotting == "individual":
+                #     #     assemblies, assemblies_unique, image_paths = best_assemblies
+                #     #     fig, ax = visualization.create_minimal_figure()
+                #     #     n_animals = len(cfg["individuals"])
+                #     #     if cfg["uniquebodyparts"]:
+                #     #         n_animals += 1
+                #     #     colors = visualization.get_cmap(n_animals, name=cfg["colormap"])
+                #     #     for k, v in tqdm(assemblies.items()):
+                #     #         imname = image_paths[k]
+                #     #         image_path = os.path.join(cfg["project_path"], *imname)
+                #     #         frame = auxfun_videos.imread(image_path, mode="skimage")
+                #     #
+                #     #         h, w, _ = np.shape(frame)
+                #     #         fig.set_size_inches(w / 100, h / 100)
+                #     #         ax.set_xlim(0, w)
+                #     #         ax.set_ylim(0, h)
+                #     #         ax.invert_yaxis()
+                #     #
+                #     #         gt = [
+                #     #             s.to_numpy().reshape((-1, 2))
+                #     #             for _, s in Data.loc[imname].groupby("individuals")
+                #     #         ]
+                #     #         coords_pred = []
+                #     #         coords_pred += [ass.xy for ass in v]
+                #     #         probs_pred = []
+                #     #         probs_pred += [ass.data[:, 2:3] for ass in v]
+                #     #         if assemblies_unique is not None:
+                #     #             unique = assemblies_unique.get(k, None)
+                #     #             if unique is not None:
+                #     #                 coords_pred.append(unique[:, :2])
+                #     #                 probs_pred.append(unique[:, 2:3])
+                #     #         while len(coords_pred) < len(gt):
+                #     #             coords_pred.append(np.full((1, 2), np.nan))
+                #     #             probs_pred.append(np.full((1, 2), np.nan))
+                #     #         ax = visualization.make_multianimal_labeled_image(
+                #     #             frame,
+                #     #             gt,
+                #     #             coords_pred,
+                #     #             probs_pred,
+                #     #             colors,
+                #     #             cfg["dotsize"],
+                #     #             cfg["alphavalue"],
+                #     #             cfg["pcutoff"],
+                #     #             ax=ax,
+                #     #         )
+                #     #         visualization.save_labeled_frame(
+                #     #             fig, image_path, foldername, k in trainIndices,
+                #     #         )
+                #     #         visualization.erase_artists(ax)
+                #
+                #     df = results[1].copy()
+                #     df.loc(axis=0)[("mAP_train", "mean")] = [
+                #         d[0]["mAP"] for d in results[2]
+                #     ]
+                #     df.loc(axis=0)[("mAR_train", "mean")] = [
+                #         d[0]["mAR"] for d in results[2]
+                #     ]
+                #     df.loc(axis=0)[("mAP_test", "mean")] = [
+                #         d[1]["mAP"] for d in results[2]
+                #     ]
+                #     df.loc(axis=0)[("mAR_test", "mean")] = [
+                #         d[1]["mAR"] for d in results[2]
+                #     ]
+                #     with open(data_path.replace("_full.", "_map."), "wb") as file:
+                #         pickle.dump((df, paf_scores), file)
+                #
+                # if len(final_result) > 0:  # Only append if results were calculated
+                #     make_results_file(final_result, evaluationfolder, DLCscorer)
 
-                        if show_errors:
-                            string = (
-                                "Results for {} training iterations, training fraction of {}, and shuffle {}:\n"
-                                "Train error: {} pixels. Test error: {} pixels.\n"
-                                "With pcutoff of {}:\n"
-                                "Train error: {} pixels. Test error: {} pixels."
-                            )
-                            print(string.format(*results))
-
-                            print("##########################################")
-                            print(
-                                "Average Euclidean distance to GT per individual (in pixels; test-only)"
-                            )
-                            if test_only:
-                                print(
-                                    error_masked
-                                    .groupby("individuals", axis=1)
-                                    .mean()
-                                    .mean()
-                                    .to_string()
-                                )
-                            else:
-                                print(
-                                    error_masked.iloc[testIndices]
-                                    .groupby("individuals", axis=1)
-                                    .mean()
-                                    .mean()
-                                    .to_string()
-                                )
-                            print(
-                                "Average Euclidean distance to GT per bodypart (in pixels; test-only)"
-                            )
-                            if test_only:
-                                print(
-                                    error_masked
-                                    .groupby("bodyparts", axis=1)
-                                    .mean()
-                                    .mean()
-                                    .to_string()
-                                )
-                            else:
-                                print(
-                                    error_masked.iloc[testIndices]
-                                    .groupby("bodyparts", axis=1)
-                                    .mean()
-                                    .mean()
-                                    .to_string()
-                                )
-
-                        PredicteData["metadata"] = {
-                            "nms radius": dlc_cfg["nmsradius"],
-                            "minimal confidence": dlc_cfg["minconfidence"],
-                            "sigma": dlc_cfg.get("sigma", 1),
-                            "PAFgraph": dlc_cfg["partaffinityfield_graph"],
-                            "PAFinds": np.arange(
-                                len(dlc_cfg["partaffinityfield_graph"])
-                            ),
-                            "all_joints": [
-                                [i] for i in range(len(dlc_cfg["all_joints"]))
-                            ],
-                            "all_joints_names": [
-                                dlc_cfg["all_joints_names"][i]
-                                for i in range(len(dlc_cfg["all_joints"]))
-                            ],
-                            "stride": dlc_cfg.get("stride", 8),
-                        }
-                        print(
-                            "Done and results stored for snapshot: ",
-                            Snapshots[snapindex],
-                        )
-
-                        dictionary = {
-                            "Scorer": DLCscorer,
-                            "DLC-model-config file": dlc_cfg,
-                            "trainIndices": trainIndices,
-                            "testIndices": testIndices,
-                            "trainFraction": trainFraction,
-                        }
-                        metadata = {"data": dictionary}
-                        _ = auxfun_multianimal.SaveFullMultiAnimalData(
-                            PredicteData, metadata, resultsfilename
-                        )
-
-                        tf.compat.v1.reset_default_graph()
-
-                    n_multibpts = len(cfg["multianimalbodyparts"])
-                    if n_multibpts == 1:
-                        continue
-
-                    # Skip data-driven skeleton selection unless
-                    # the model was trained on the full graph.
-                    max_n_edges = n_multibpts * (n_multibpts - 1) // 2
-                    n_edges = len(dlc_cfg["partaffinityfield_graph"])
-                    if n_edges == max_n_edges:
-                        print("Selecting best skeleton...")
-                        n_graphs = 10
-                        paf_inds = None
-                    else:
-                        n_graphs = 1
-                        paf_inds = [list(range(n_edges))]
-                    (
-                        results,
-                        paf_scores,
-                        best_assemblies,
-                    ) = crossvalutils.cross_validate_paf_graphs(
-                        config,
-                        str(path_test_config).replace("pose_", "inference_"),
-                        data_path,
-                        data_path.replace("_full.", "_meta."),
-                        n_graphs=n_graphs,
-                        paf_inds=paf_inds,
-                        oks_sigma=dlc_cfg.get("oks_sigma", 0.1),
-                        margin=dlc_cfg.get("bbox_margin", 0),
-                        symmetric_kpts=dlc_cfg.get("symmetric_kpts"),
-                    )
-                    if plotting == "individual":
-                        assemblies, assemblies_unique, image_paths = best_assemblies
-                        fig, ax = visualization.create_minimal_figure()
-                        n_animals = len(cfg["individuals"])
-                        if cfg["uniquebodyparts"]:
-                            n_animals += 1
-                        colors = visualization.get_cmap(n_animals, name=cfg["colormap"])
-                        for k, v in tqdm(assemblies.items()):
-                            imname = image_paths[k]
-                            image_path = os.path.join(cfg["project_path"], *imname)
-                            frame = auxfun_videos.imread(image_path, mode="skimage")
-
-                            h, w, _ = np.shape(frame)
-                            fig.set_size_inches(w / 100, h / 100)
-                            ax.set_xlim(0, w)
-                            ax.set_ylim(0, h)
-                            ax.invert_yaxis()
-
-                            gt = [
-                                s.to_numpy().reshape((-1, 2))
-                                for _, s in Data.loc[imname].groupby("individuals")
-                            ]
-                            coords_pred = []
-                            coords_pred += [ass.xy for ass in v]
-                            probs_pred = []
-                            probs_pred += [ass.data[:, 2:3] for ass in v]
-                            if assemblies_unique is not None:
-                                unique = assemblies_unique.get(k, None)
-                                if unique is not None:
-                                    coords_pred.append(unique[:, :2])
-                                    probs_pred.append(unique[:, 2:3])
-                            while len(coords_pred) < len(gt):
-                                coords_pred.append(np.full((1, 2), np.nan))
-                                probs_pred.append(np.full((1, 2), np.nan))
-                            ax = visualization.make_multianimal_labeled_image(
-                                frame,
-                                gt,
-                                coords_pred,
-                                probs_pred,
-                                colors,
-                                cfg["dotsize"],
-                                cfg["alphavalue"],
-                                cfg["pcutoff"],
-                                ax=ax,
-                            )
-                            visualization.save_labeled_frame(
-                                fig, image_path, foldername, k in trainIndices,
-                            )
-                            visualization.erase_artists(ax)
-
-                    df = results[1].copy()
-                    df.loc(axis=0)[("mAP_train", "mean")] = [
-                        d[0]["mAP"] for d in results[2]
-                    ]
-                    df.loc(axis=0)[("mAR_train", "mean")] = [
-                        d[0]["mAR"] for d in results[2]
-                    ]
-                    df.loc(axis=0)[("mAP_test", "mean")] = [
-                        d[1]["mAP"] for d in results[2]
-                    ]
-                    df.loc(axis=0)[("mAR_test", "mean")] = [
-                        d[1]["mAR"] for d in results[2]
-                    ]
-                    with open(data_path.replace("_full.", "_map."), "wb") as file:
-                        pickle.dump((df, paf_scores), file)
-
-                if len(final_result) > 0:  # Only append if results were calculated
-                    make_results_file(final_result, evaluationfolder, DLCscorer)
-
+        my_all_results.append(my_test_results)
+    print(my_all_results)
+    with open(os.path.join(cfg["project_path"], 'evaluation-results', "iteration-" + str(cfg["iteration"]), 'my_all_results.txt'), 'w') as f:
+        f.write(str(my_all_results))
     os.chdir(str(start_path))

@@ -19,10 +19,11 @@ from imgaug.augmentables import Keypoint, KeypointsOnImage
 from deeplabcut.pose_estimation_tensorflow.datasets import augmentation
 from deeplabcut.pose_estimation_tensorflow.datasets.factory import PoseDatasetFactory
 from deeplabcut.pose_estimation_tensorflow.datasets.pose_base import BasePoseDataset
+# from deeplabcut.pose_estimation_tensorflow.datasets.pose_base import BasePoseDataset
 from deeplabcut.pose_estimation_tensorflow.datasets.utils import DataItem, Batch
 from deeplabcut.utils.auxiliaryfunctions import read_config
 from deeplabcut.utils.auxfun_multianimal import extractindividualsandbodyparts
-from deeplabcut.utils.auxfun_videos import imread
+from deeplabcut.utils.auxfun_videos import imread, imresize
 from deeplabcut.utils.conversioncode import robust_split_path
 from math import sqrt
 
@@ -78,12 +79,12 @@ class MAImgaugPoseDataset(BasePoseDataset):
             if "joints" in sample.keys():
                 Joints = sample["joints"]
                 if (
-                    np.size(
-                        np.concatenate(
-                            [Joints[person_id][:, 1:3] for person_id in Joints.keys()]
+                        np.size(
+                            np.concatenate(
+                                [Joints[person_id][:, 1:3] for person_id in Joints.keys()]
+                            )
                         )
-                    )
-                    > 0
+                        > 0
                 ):
                     item.joints = Joints
                 else:
@@ -248,6 +249,7 @@ class MAImgaugPoseDataset(BasePoseDataset):
 
     def get_batch(self):
         img_idx = np.random.choice(self.num_images, size=self.batch_size, replace=True)
+        print(img_idx)
         batch_images = []
         batch_joints = []
         joint_ids = []
@@ -280,7 +282,7 @@ class MAImgaugPoseDataset(BasePoseDataset):
         return batch_images, joint_ids, batch_joints, inds_visible, data_items
 
     def get_targetmaps_update(
-        self, joint_ids, joints, data_items, sm_size, scale,
+            self, joint_ids, joints, data_items, sm_size, scale,
     ):
         part_score_targets = []
         part_score_weights = []
@@ -344,7 +346,7 @@ class MAImgaugPoseDataset(BasePoseDataset):
     def next_batch(self, plotting=False):
         while True:
             batch_images, joint_ids, batch_joints, inds_visible, data_items = self.get_batch()
-
+            # print(batch_images, joint_ids, batch_joints, inds_visible, data_items)
             # Scale is sampled only once (per batch) to transform all of the images into same size.
             target_size, sm_size = self.calc_target_and_scoremap_sizes()
             scale = np.mean(target_size / self.default_size)
@@ -430,7 +432,7 @@ class MAImgaugPoseDataset(BasePoseDataset):
         if cfg["weigh_only_present_joints"]:
             weights = np.zeros(scmap_shape)
             for k, j_id in enumerate(
-                np.concatenate(joint_id)
+                    np.concatenate(joint_id)
             ):  # looping over all animals
                 weights[:, :, j_id] = 1.0
         else:
@@ -438,7 +440,7 @@ class MAImgaugPoseDataset(BasePoseDataset):
         return weights
 
     def compute_target_part_scoremap_numpy(
-        self, joint_id, coords, data_item, size, scale
+            self, joint_id, coords, data_item, size, scale
     ):
         stride = self.cfg["stride"]
         half_stride = stride // 2
@@ -537,14 +539,14 @@ class MAImgaugPoseDataset(BasePoseDataset):
 
                         distance_along = Dx * x + Dy * y
                         distance_across = (
-                            ((y * Dx - x * Dy) - d2mid)
-                            * 1.0
-                            / self.cfg["pafwidth"]
-                            * scale
+                                ((y * Dx - x * Dy) - d2mid)
+                                * 1.0
+                                / self.cfg["pafwidth"]
+                                * scale
                         )
 
                         mask1 = (distance_along >= d1lowerboundary) & (
-                            distance_along <= d1upperboundary
+                                distance_along <= d1upperboundary
                         )
                         distance_across_abs = np.abs(distance_across)
                         mask2 = distance_across_abs <= 1
@@ -659,22 +661,22 @@ class MAImgaugPoseDataset(BasePoseDataset):
                             d2mid = j_y * Dx - j_x * Dy  # orthogonal direction
 
                             distance_along = Dx * (x * stride + half_stride) + Dy * (
-                                y * stride + half_stride
+                                    y * stride + half_stride
                             )
                             distance_across = (
-                                (
                                     (
-                                        (y * stride + half_stride) * Dx
-                                        - (x * stride + half_stride) * Dy
+                                            (
+                                                    (y * stride + half_stride) * Dx
+                                                    - (x * stride + half_stride) * Dy
+                                            )
+                                            - d2mid
                                     )
-                                    - d2mid
-                                )
-                                * 1.0
-                                / self.cfg["pafwidth"]
-                                * scale
+                                    * 1.0
+                                    / self.cfg["pafwidth"]
+                                    * scale
                             )
                             mask1 = (distance_along >= d1lowerboundary) & (
-                                distance_along <= d1upperboundary
+                                    distance_along <= d1upperboundary
                             )
                             mask2 = np.abs(distance_across) <= 1
                             # mask3 = ((x >= 0) & (x <= width-1))
@@ -685,13 +687,184 @@ class MAImgaugPoseDataset(BasePoseDataset):
                                 partaffinityfield_mask[mask, l * 2 + 1] = 1.0
 
                             partaffinityfield_map[mask, l * 2 + 0] = (
-                                Dx * (1 - abs(distance_across))
+                                    Dx * (1 - abs(distance_across))
                             )[mask]
                             partaffinityfield_map[mask, l * 2 + 1] = (
-                                Dy * (1 - abs(distance_across))
+                                    Dy * (1 - abs(distance_across))
                             )[mask]
 
             coordinateoffset += len(joint_ids)  # keeping track of the blocks
 
         weights = self.compute_scmap_weights(scmap.shape, joint_id)
         return scmap, weights, locref_map, locref_mask
+
+
+@PoseDatasetFactory.register("multi-animal-eval")
+class MAEvalPoseDataset(MAImgaugPoseDataset):
+    def __init__(self, cfg):
+        super(MAEvalPoseDataset, self).__init__(cfg)
+        self.cfg["dataset"] = self.cfg["dataset"].replace('.pickle', '_testset.pickle')
+        # self.cfg["dataset"] = 'training-datasets/iteration-0/UnaugmentedDataSet_dlc-110659Jan24/dlc-110659_Mitch95shuffle1_testset.pickle'
+        self.data = self.load_dataset()
+        # print(self.data)
+        self.num_images = len(self.data)
+        # print(self.num_images)
+        self.num_batch = int(self.num_images / self.batch_size)
+        # print(self.num_batch)
+        self.current_batch = 0
+    #     self.test()
+    #
+    # def test(self):
+    #     sizes = []
+    #     for data_item in self.data:
+    #         # data_item = d[0]
+    #         size = data_item.im_size
+    #         if not size in sizes:
+    #             sizes.append(size)
+    #     print(sizes)
+
+    def get_batch(self):
+        # img_idx = np.random.choice(self.num_images, size=self.batch_size, replace=True)
+        # print(img_idx)
+        batch_images = []
+        batch_joints = []
+        joint_ids = []
+        inds_visible = []
+        data_items = []
+        im_h, im_w = 0, 0
+        start_id = self.current_batch * self.batch_size
+        end_id = start_id + self.batch_size
+        img_idx = [x for x in range(start_id, end_id)]
+        for i in img_idx:
+            # print(i)
+            data_item = self.data[i]
+
+            data_items.append(data_item)
+            im_file = data_item.im_path
+            # print(im_file)
+            # print(data_item.im_size)
+
+            # logging.debug("image %s", im_file)
+            image = imread(
+                os.path.join(self.cfg["project_path"], im_file), mode="skimage"
+            )
+            im_size = data_item.im_size
+            if im_size[1] > 1800 or im_size[2] > 1800:
+                print(f'resizing batch because size of {data_item.im_path}')
+                size = 0.5
+                image = imresize(image, size=size)
+            im_h = max(im_h, image.shape[0])
+            im_w = max(im_w, image.shape[1])
+            if self.has_gt:
+                Joints = data_item.joints
+                kpts = np.zeros((self._n_kpts * self._n_animals, 2))
+                for j in range(self._n_animals):
+                    for n, x, y in Joints.get(j, []):
+                        kpts[j * self._n_kpts + int(n)] = x, y
+                joint_id = [
+                    Joints[person_id][:, 0].astype(int) for person_id in Joints.keys()
+                ]
+                joint_ids.append(joint_id)
+                batch_joints.append(kpts)
+            #     inds_visible.append(np.flatnonzero(np.all(kpts != 0, axis=1)))
+
+            batch_images.append(image)
+
+        # array = np.zeros([self.batch_size, im_h, im_w, 3], dtype=np.uint8)
+        # print(im_h, im_w)
+        for i, img in enumerate(batch_images):
+            # print(img.shape)
+            pad_width = ((0, im_h - img.shape[0]), (0, im_w - img.shape[1]), (0, 0))
+            batch_images[i] = np.pad(img, pad_width, mode='constant', constant_values=0)
+
+        #
+        #
+        # for i, img in enumerate(batch_images):
+        #     print(img.shape)
+        #     pad_width = ((img.shape[0], im_h), (img.shape[1], im_w), (0, 0))
+        #     batch_images[i] = np.pad(img, pad_width, mode='constant')
+        #
+        # for i, img in enumerate(batch_images):
+        #     print(img.shape)
+        # batch_images = array
+        batch_images = np.asarray(batch_images)
+        # print(type(batch_images))
+        # print(batch_images.shape)
+        # pad_width = 3
+        # batch_images = np.pad(batch_images, pad_width, mode='maximum')
+        # print(batch_images.shape)
+        # print(im_h, im_w)
+        # for img in batch_images:
+        #     print(img.shape)
+        #     if not img.shape == (3, im_h, im_w):
+        #         print('need reshape')
+        return batch_images, joint_ids, batch_joints, inds_visible, data_items
+
+    def next_batch(self, plotting=False):
+        while True:
+            batch_images, joint_ids, batch_joints, inds_visible, data_items = self.get_batch()
+            self.current_batch += 1
+            # for img in batch_images:
+            #     print(img.shape)
+            # # print(batch_images, joint_ids, batch_joints, inds_visible, data_items)
+            # # Scale is sampled only once (per batch) to transform all of the images into same size.
+            # target_size, sm_size = self.calc_target_and_scoremap_sizes()
+            # scale = np.mean(target_size / self.default_size)
+            # augmentation.update_crop_size(self.pipeline, *target_size)
+            # batch_images, batch_joints = self.pipeline(
+            #     images=batch_images, keypoints=batch_joints
+            # )
+            # # for img in batch_images:
+            #     # print(img.shape)
+            # batch_images = np.asarray(batch_images)
+            # image_shape = batch_images.shape[1:3]
+            # Discard keypoints whose coordinates lie outside the cropped image
+            # batch_joints_valid = []
+            # joint_ids_valid = []
+            # for joints, ids, visible in zip(batch_joints, joint_ids, inds_visible):
+            #     joints = joints[visible]
+            #     inside = np.logical_and.reduce(
+            #         (
+            #             joints[:, 0] < image_shape[1],
+            #             joints[:, 0] > 0,
+            #             joints[:, 1] < image_shape[0],
+            #             joints[:, 1] > 0,
+            #         )
+            #     )
+            #     batch_joints_valid.append(joints[inside])
+            #     temp = []
+            #     start = 0
+            #     for array in ids:
+            #         end = start + array.size
+            #         temp.append(array[inside[start:end]])
+            #         start = end
+            #     joint_ids_valid.append(temp)
+
+            # If you would like to check the augmented images, script for saving
+            # the images with joints on:
+            # if plotting:
+            #     for i in range(self.batch_size):
+            #         joints = batch_joints_valid[i]
+            #         kps = KeypointsOnImage(
+            #             [Keypoint(x=joint[0], y=joint[1]) for joint in joints],
+            #             shape=batch_images[i].shape,
+            #         )
+            #         im = kps.draw_on_image(batch_images[i])
+            #         imageio.imwrite(
+            #             os.path.join(self.cfg["project_path"], str(i) + ".png"), im
+            #         )
+
+            batch = {Batch.inputs: batch_images.astype(np.float64)}
+            # if self.has_gt:
+            #     targetmaps = self.get_targetmaps_update(
+            #         joint_ids_valid,
+            #         batch_joints_valid,
+            #         data_items,
+            #         (sm_size[1], sm_size[0]),
+            #         scale,
+            #     )
+            #     batch.update(targetmaps)
+
+            batch = {key: np.asarray(data) for (key, data) in batch.items()}
+            batch[Batch.data_item] = data_items
+            return batch

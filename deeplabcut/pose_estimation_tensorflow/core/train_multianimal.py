@@ -200,6 +200,7 @@ def train(
         # Save snapshot
         if (it % save_iters == 0 and it != start_iter) or it == max_iter:
             model_name = cfg["snapshot_prefix"]
+
             saver.save(sess, model_name, global_step=it)
 
     lrf.close()
